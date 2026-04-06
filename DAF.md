@@ -509,7 +509,7 @@ No map, no path planner, no knowledge of obstacle shape. Just three real-time se
 | $p$ | Robot position | Odometry / GPS / motion capture |
 | $v$ | Robot velocity | Differentiate $p$ or use IMU |
 | $p_d$ | Goal position | Given by the mission |
-| $d(p)$ | $\text{min\_range} - (R + \epsilon)$ | LiDAR minimum range reading |
+| $d(p)$ | min\_range $- (R + \epsilon)$ | LiDAR minimum range reading |
 | $\eta(p)$ | Unit vector toward the minimum range reading | LiDAR bearing of closest hit |
 | $k_1, k_2, k_3$ | Positive scalar gains | Tuning parameters |
 | $\gamma(d(p))$ | Evaluate Eq. 11 | Computed from $d(p)$ |
