@@ -46,16 +46,16 @@ Every symbol in the paper, grouped by category.
 
 | Symbol | Type | Meaning |
 |--------|------|---------|
-| $\mathbb{R}$ | set | Real numbers |
-| $\mathbb{R}_{>0}$ | set | Positive real numbers (strictly > 0) |
-| $\mathbb{N}$ | set | Natural numbers {1, 2, 3, ...} |
-| $\mathbb{R}^n$ | set | n-dimensional Euclidean space — the world the robot lives in |
-| $n$ | $\mathbb{N}$ | Dimension of the workspace (2 for planar, 3 for spatial) |
-| $\mathcal{W}$ | $\subset \mathbb{R}^n$ | Workspace — the closed, bounded region the robot operates in (the "room") |
+| ℝ | set | Real numbers |
+| ℝ₊ | set | Positive real numbers (strictly > 0) |
+| ℕ | set | Natural numbers {1, 2, 3, ...} |
+| ℝⁿ | set | n-dimensional Euclidean space — the world the robot lives in |
+| $n$ | ℕ | Dimension of the workspace (2 for planar, 3 for spatial) |
+| $\mathcal{W}$ | ⊂ ℝⁿ | Workspace — the closed, bounded region the robot operates in (the "room") |
 | $\mathcal{O}_i$ | $\subset \mathcal{W}$ | The i-th obstacle — a compact (closed + bounded) subset |
-| $m$ | $\mathbb{N}$ | Number of obstacles |
+| $m$ | ℕ | Number of obstacles |
 | $\mathcal{X}$ | $\subset \mathcal{W}$ | Free space — where the robot is allowed to be |
-| $\mathcal{X}^{\mathcal{C}}$ | $\subset \mathbb{R}^n$ | Complement of free space = the obstacle region |
+| $\mathcal{X}^{\mathcal{C}}$ | ⊂ ℝⁿ | Complement of free space = the obstacle region |
 | $\mathcal{X}_\epsilon$ | $\subset \mathcal{X}$ | Practical free space — free space shrunk by $R + \epsilon$ |
 | $\partial \mathcal{X}_\epsilon$ | set | Boundary of practical free space |
 | $\text{int}(\cdot)$ | operator | Topological interior of a set |
@@ -69,75 +69,75 @@ Every symbol in the paper, grouped by category.
 
 | Symbol | Type | Meaning |
 |--------|------|---------|
-| $p$ | $\in \mathbb{R}^n$ | **Position** of the robot's centre |
-| $v$ | $\in \mathbb{R}^n$ | **Velocity** of the robot ($\dot{p} = v$) |
-| $u$ | $\in \mathbb{R}^n$ | **Control input** — the acceleration we command ($\dot{v} = u$) |
-| $\dot{p}$ | $\in \mathbb{R}^n$ | Time derivative of position = velocity |
-| $\dot{v}$ | $\in \mathbb{R}^n$ | Time derivative of velocity = acceleration |
-| $p_d$ | $\in \mathbb{R}^n$ | **Desired target position** (the goal) |
-| $R$ | $\in \mathbb{R}_{>0}$ | **Radius** of the ball-shaped robot |
+| $p$ | ∈ ℝⁿ | **Position** of the robot's centre |
+| $v$ | ∈ ℝⁿ | **Velocity** of the robot ($\dot{p} = v$) |
+| $u$ | ∈ ℝⁿ | **Control input** — the acceleration we command ($\dot{v} = u$) |
+| $\dot{p}$ | ∈ ℝⁿ | Time derivative of position = velocity |
+| $\dot{v}$ | ∈ ℝⁿ | Time derivative of velocity = acceleration |
+| $p_d$ | ∈ ℝⁿ | **Desired target position** (the goal) |
+| $R$ | ∈ ℝ₊ | **Radius** of the ball-shaped robot |
 
 ### Distance and Geometry Variables
 
 | Symbol | Type | Meaning |
 |--------|------|---------|
-| $d^0_\mathcal{A}(p)$ | $\mathbb{R}_{\geq 0}$ | Unsigned distance from point $p$ to the closest point in set $\mathcal{A}$: $\inf_{y \in \mathcal{A}} \|y - p\|$ |
-| $d_\mathcal{A}(p)$ | $\mathbb{R}$ | **Oriented (signed) distance** function: $d^0_\mathcal{A}(p) - d^0_{\mathcal{A}^C}(p)$. Positive outside $\mathcal{A}$, negative inside. |
-| $d_{\mathcal{X}^C}(p)$ | $\mathbb{R}$ | Oriented distance from $p$ to the obstacle region. Positive when $p$ is in free space. |
-| $d(p)$ | $\mathbb{R}$ | **Shorthand**: $d_{\mathcal{X}^C}(p) - (R + \epsilon)$. This is 0 at the boundary of $\mathcal{X}_\epsilon$ and positive inside $\mathcal{X}_\epsilon$. **This is the distance the controller actually uses.** |
-| $\dot{d}(p,v)$ | $\mathbb{R}$ | Time derivative of $d(p) = \eta(p)^\top v$. Rate of change of distance to obstacle. Negative means approaching. |
-| $\ddot{d}$ | $\mathbb{R}$ | Second time derivative of $d(p)$. Acceleration of the distance. |
-| $\mathbf{P}_\mathcal{A}(p)$ | $\in \mathbb{R}^n$ | **Projection** of $p$ onto set $\mathcal{A}$ — the closest point in $\mathcal{A}$ to $p$ |
-| $\mathbf{P}_{\partial \mathcal{A}}(p)$ | $\in \mathbb{R}^n$ | Projection onto the boundary of $\mathcal{A}$ — the nearest boundary point |
-| $\mathbf{P}_{\partial \mathcal{X}}(p)$ | $\in \mathbb{R}^n$ | Nearest point on the obstacle boundary to the robot |
-| $\eta(p)$ | $\in \mathbb{R}^n$, $\|\eta\|=1$ | **Unit normal vector** $= \nabla d_{\mathcal{X}^C}(p)$. Points away from nearest obstacle toward robot. The robot's "danger compass." |
-| $\mathbf{H}(p)$ | $\mathbb{R}^{n \times n}$ | **Hessian matrix** $= \nabla^2 d_{\mathcal{X}^C}(p)$. Encodes how the obstacle surface curves at the nearest point. |
-| $\lambda_\mathbf{H}(p^*)$ | $\mathbb{R}$ | An eigenvalue of $\mathbf{H}(p^*)$. The non-zero eigenvalues equal the **principal curvatures** of the obstacle boundary at $p^*$. |
+| $d^0_\mathcal{A}(p)$ | ℝ≥₀ | Unsigned distance from point $p$ to the closest point in set $\mathcal{A}$: $\inf_{y \in \mathcal{A}} \|y - p\|$ |
+| $d_\mathcal{A}(p)$ | ℝ | **Oriented (signed) distance** function: $d^0_\mathcal{A}(p) - d^0_{\mathcal{A}^C}(p)$. Positive outside $\mathcal{A}$, negative inside. |
+| $d_{\mathcal{X}^C}(p)$ | ℝ | Oriented distance from $p$ to the obstacle region. Positive when $p$ is in free space. |
+| $d(p)$ | ℝ | **Shorthand**: $d_{\mathcal{X}^C}(p) - (R + \epsilon)$. This is 0 at the boundary of $\mathcal{X}_\epsilon$ and positive inside $\mathcal{X}_\epsilon$. **This is the distance the controller actually uses.** |
+| $\dot{d}(p,v)$ | ℝ | Time derivative of $d(p) = \eta(p)^\top v$. Rate of change of distance to obstacle. Negative means approaching. |
+| $\ddot{d}$ | ℝ | Second time derivative of $d(p)$. Acceleration of the distance. |
+| $\mathbf{P}_\mathcal{A}(p)$ | ∈ ℝⁿ | **Projection** of $p$ onto set $\mathcal{A}$ — the closest point in $\mathcal{A}$ to $p$ |
+| $\mathbf{P}_{\partial \mathcal{A}}(p)$ | ∈ ℝⁿ | Projection onto the boundary of $\mathcal{A}$ — the nearest boundary point |
+| $\mathbf{P}_{\partial \mathcal{X}}(p)$ | ∈ ℝⁿ | Nearest point on the obstacle boundary to the robot |
+| $\eta(p)$ | ∈ ℝⁿ, ‖η‖=1 | **Unit normal vector** $= \nabla d_{\mathcal{X}^C}(p)$. Points away from nearest obstacle toward robot. The robot's "danger compass." |
+| $\mathbf{H}(p)$ | ℝⁿˣⁿ | **Hessian matrix** $= \nabla^2 d_{\mathcal{X}^C}(p)$. Encodes how the obstacle surface curves at the nearest point. |
+| $\lambda_\mathbf{H}(p^*)$ | ℝ | An eigenvalue of $\mathbf{H}(p^*)$. The non-zero eigenvalues equal the **principal curvatures** of the obstacle boundary at $p^*$. |
 
 ### Design Parameters (You Choose These)
 
 | Symbol | Type | Meaning | Typical Value (from paper) |
 |--------|------|---------|---------------------------|
-| $\epsilon$ | $\in \mathbb{R}_{>0}$ | Safety margin beyond robot radius | 0.06 |
-| $\epsilon_1$ | $\in \mathbb{R}_{>0}$ | Inner braking zone boundary (below this, $\gamma = 1/d$) | 0.3 |
-| $\epsilon_2$ | $\in \mathbb{R}_{>0}$ | Outer braking zone boundary (above this, $\gamma = 0$) | 0.6 |
-| $k_1$ | $\in \mathbb{R}_{>0}$ | **Position gain** — strength of goal-seeking spring | 3 |
-| $k_2$ | $\in \mathbb{R}_{>0}$ | **Damping gain** — strength of velocity friction | 2 |
-| $k_3$ | $\in \mathbb{R}_{>0}$ | **Avoidance gain** — strength of obstacle braking | 8 |
+| $\epsilon$ | ∈ ℝ₊ | Safety margin beyond robot radius | 0.06 |
+| $\epsilon_1$ | ∈ ℝ₊ | Inner braking zone boundary (below this, $\gamma = 1/d$) | 0.3 |
+| $\epsilon_2$ | ∈ ℝ₊ | Outer braking zone boundary (above this, $\gamma = 0$) | 0.6 |
+| $k_1$ | ∈ ℝ₊ | **Position gain** — strength of goal-seeking spring | 3 |
+| $k_2$ | ∈ ℝ₊ | **Damping gain** — strength of velocity friction | 2 |
+| $k_3$ | ∈ ℝ₊ | **Avoidance gain** — strength of obstacle braking | 8 |
 
 ### Geometric Constants (Properties of the Workspace)
 
 | Symbol | Type | Meaning |
 |--------|------|---------|
-| $h$ | $\in \mathbb{R}_{>0}$ | **Positive reach** of $\mathcal{X}$ (Assumption 1): the largest $h$ such that every point within distance $h$ of $\mathcal{X}^C$ has a unique projection onto $\partial \mathcal{X}$. Roughly: "how close can you get before the nearest-obstacle direction becomes ambiguous (e.g., equidistant from two obstacles)." |
-| $\rho$ | $\in \mathbb{R}_{>0}$ | **Smoothness radius** (Assumption 2): the distance within which $d_{\mathcal{X}^C}$, $\nabla d_{\mathcal{X}^C}$, and $\nabla^2 d_{\mathcal{X}^C}$ are all continuous. Roughly: "how close can you get before the distance function stops being smooth." |
+| $h$ | ∈ ℝ₊ | **Positive reach** of $\mathcal{X}$ (Assumption 1): the largest $h$ such that every point within distance $h$ of $\mathcal{X}^C$ has a unique projection onto $\partial \mathcal{X}$. Roughly: "how close can you get before the nearest-obstacle direction becomes ambiguous (e.g., equidistant from two obstacles)." |
+| $\rho$ | ∈ ℝ₊ | **Smoothness radius** (Assumption 2): the distance within which $d_{\mathcal{X}^C}$, $\nabla d_{\mathcal{X}^C}$, and $\nabla^2 d_{\mathcal{X}^C}$ are all continuous. Roughly: "how close can you get before the distance function stops being smooth." |
 
 ### Energy Functions
 
 | Symbol | Type | Meaning |
 |--------|------|---------|
-| $L(p,v)$ | $\mathbb{R}$ | **Lagrangian** $= T(v) - U(p)$ |
-| $T(v)$ | $\mathbb{R}_{\geq 0}$ | Kinetic energy $= v^\top v / 2 = \|v\|^2/2$ |
-| $U(p)$ | $\mathbb{R}_{\geq 0}$ | Potential energy $= (k_1/2)\|p - p_d\|^2$ — a quadratic bowl centred on the goal |
-| $D(p,v)$ | $\mathbb{R}_{\geq 0}$ | **Total Rayleigh dissipation** — energy lost to friction per unit time |
-| $D_s(v)$ | $\mathbb{R}_{\geq 0}$ | Stabilisation dissipation — always-on velocity damping |
-| $D_a(p,v)$ | $\mathbb{R}_{\geq 0}$ | Avoidance dissipation — obstacle-aware directional braking |
-| $\mathcal{L}(p,v)$ | $\mathbb{R}_{\geq 0}$ | **Lyapunov function** (Eq. 19) $= (k_1/2)\|p-p_d\|^2 + (1/2)\|v\|^2$ — total energy used for stability proof |
+| $L(p,v)$ | ℝ | **Lagrangian** $= T(v) - U(p)$ |
+| $T(v)$ | ℝ≥₀ | Kinetic energy $= v^\top v / 2 = \|v\|^2/2$ |
+| $U(p)$ | ℝ≥₀ | Potential energy $= (k_1/2)\|p - p_d\|^2$ — a quadratic bowl centred on the goal |
+| $D(p,v)$ | ℝ≥₀ | **Total Rayleigh dissipation** — energy lost to friction per unit time |
+| $D_s(v)$ | ℝ≥₀ | Stabilisation dissipation — always-on velocity damping |
+| $D_a(p,v)$ | ℝ≥₀ | Avoidance dissipation — obstacle-aware directional braking |
+| $\mathcal{L}(p,v)$ | ℝ≥₀ | **Lyapunov function** (Eq. 19) $= (k_1/2)\|p-p_d\|^2 + (1/2)\|v\|^2$ — total energy used for stability proof |
 
 ### Proof-Specific Variables
 
 | Symbol | Type | Meaning |
 |--------|------|---------|
-| $\Phi(d, \dot{d})$ | $\mathbb{R}$ | **Barrier term** $= \gamma(d) \cdot \dot{d}$. Combines proximity scaling with approach rate. Blows up as $d \to 0$, creating the collision barrier. |
-| $\alpha(p,v)$ | $\mathbb{R}$ | **Bounded remainder** $= k_1 \eta(p)^\top(p - p_d) - v^\top \mathbf{H}(p)v$. Captures goal-pull in obstacle direction + curvature correction. Proved bounded — can't overwhelm the barrier. |
-| $\alpha_\Phi$ | $\mathbb{R}$ | Limiting constant value of $\Phi$ at a stuck point. Equals $-\mu k_1 / k_3$. |
-| $\mu$ | $\mathbb{R}_{>0}$ | $\|p^* - p_d\|$ — distance from stuck point to goal |
-| $p^*$ | $\in \mathbb{R}^n$ | An undesired equilibrium point in $\mathcal{E}$ |
-| $J$ | $\mathbb{R}^{2n \times 2n}$ | Jacobian matrix of the frozen system at $(p^*, 0)$ |
-| $\mathbf{S}$ | $\mathbb{R}^{n \times n}$ | Stiffness matrix $= k_1 \mathbf{I} + k_3 \alpha_\Phi \mathbf{H}(p^*)$ |
-| $s_i$ | $\mathbb{R}$ | i-th eigenvalue of $\mathbf{S}$ $= k_1 + k_3 \alpha_\Phi \lambda^i_\mathbf{H}$ |
-| $\mathbf{I}$ | $\mathbb{R}^{n \times n}$ | Identity matrix |
-| $\pi_\eta$ | $\mathbb{R}^{n \times n}$ | Projection onto the plane orthogonal to $\eta$: $\pi_\eta = I_n - \eta\eta^\top$ |
+| $\Phi(d, \dot{d})$ | ℝ | **Barrier term** $= \gamma(d) \cdot \dot{d}$. Combines proximity scaling with approach rate. Blows up as $d \to 0$, creating the collision barrier. |
+| $\alpha(p,v)$ | ℝ | **Bounded remainder** $= k_1 \eta(p)^\top(p - p_d) - v^\top \mathbf{H}(p)v$. Captures goal-pull in obstacle direction + curvature correction. Proved bounded — can't overwhelm the barrier. |
+| $\alpha_\Phi$ | ℝ | Limiting constant value of $\Phi$ at a stuck point. Equals $-\mu k_1 / k_3$. |
+| $\mu$ | ℝ₊ | $\|p^* - p_d\|$ — distance from stuck point to goal |
+| $p^*$ | ∈ ℝⁿ | An undesired equilibrium point in $\mathcal{E}$ |
+| $J$ | ℝ²ⁿˣ²ⁿ | Jacobian matrix of the frozen system at $(p^*, 0)$ |
+| $\mathbf{S}$ | ℝⁿˣⁿ | Stiffness matrix $= k_1 \mathbf{I} + k_3 \alpha_\Phi \mathbf{H}(p^*)$ |
+| $s_i$ | ℝ | i-th eigenvalue of $\mathbf{S}$ $= k_1 + k_3 \alpha_\Phi \lambda^i_\mathbf{H}$ |
+| $\mathbf{I}$ | ℝⁿˣⁿ | Identity matrix |
+| $\pi_\eta$ | ℝⁿˣⁿ | Projection onto the plane orthogonal to $\eta$: $\pi_\eta = I_n - \eta\eta^\top$ |
 
 ---
 
@@ -216,10 +216,10 @@ $$\mathcal{X}_\epsilon := \{p \in \mathbb{R}^n : d_{\mathcal{X}^c}(p) \geq R + \
 | Variable | What it is here |
 |----------|----------------|
 | $\mathcal{X}_\epsilon$ | Practical free space — the robot centre's actual safe zone |
-| $p \in \mathbb{R}^n$ | Any candidate position |
+| p ∈ ℝⁿ | Any candidate position |
 | $d_{\mathcal{X}^C}(p)$ | Distance from $p$ to the obstacle region $\mathcal{X}^C$. Large = far from all obstacles. |
-| $R \in \mathbb{R}_{>0}$ | Robot radius |
-| $\epsilon \in \mathbb{R}_{>0}$ | Extra safety margin (design parameter) |
+| R ∈ ℝ₊ | Robot radius |
+| ε ∈ ℝ₊ | Extra safety margin (design parameter) |
 | $R + \epsilon$ | Total inflation distance. Every obstacle effectively grows by this much. |
 | $\subset \mathcal{X}$ | $\mathcal{X}_\epsilon$ is a subset of $\mathcal{X}$ (strictly smaller than free space) |
 
@@ -269,9 +269,9 @@ This is called **second-order dynamics** because we control the second derivativ
 
 | Variable | Dimension | Meaning |
 |----------|-----------|---------|
-| $p \in \mathbb{R}^n$ | n | Position of robot centre |
-| $v \in \mathbb{R}^n$ | n | Velocity of the robot |
-| $u \in \mathbb{R}^n$ | n | Control acceleration — what we **design** |
+| p ∈ ℝⁿ | n | Position of robot centre |
+| v ∈ ℝⁿ | n | Velocity of the robot |
+| u ∈ ℝⁿ | n | Control acceleration — what we **design** |
 | $\dot{p}$ | n | $dp/dt$ — rate of change of position = velocity |
 | $\dot{v}$ | n | $dv/dt$ — rate of change of velocity = acceleration |
 
@@ -359,7 +359,7 @@ $$D_a(p, v) := \frac{k_3}{2} \gamma(d(p))\, v^\top \eta(p)\, \eta(p)^\top v$$
 | Variable | Type | What it is here |
 |----------|------|----------------|
 | $k_3 > 0$ | Scalar gain | **Avoidance gain** — how aggressively the obstacle braking engages |
-| $\gamma(\cdot)$ | Function $\mathbb{R}_{>0} \to \mathbb{R}_{\geq 0}$ | **Proximity scaling function** (defined in Eq. 11) — 0 when far, $\to \infty$ when close |
+| $\gamma(\cdot)$ | Function ℝ₊ → ℝ≥₀ | **Proximity scaling function** (defined in Eq. 11) — 0 when far, $\to \infty$ when close |
 | $d(p)$ | Scalar | Effective distance to nearest obstacle boundary (shorthand defined above) |
 | $\gamma(d(p))$ | Scalar $\geq 0$ | The proximity scaling evaluated at the current distance — "how close are we?" |
 | $\eta(p)$ | $n \times 1$ unit vector | Normal pointing away from nearest obstacle |
@@ -395,7 +395,7 @@ Taking the derivatives and rearranging produces Eq. (10) directly.
 | $T(v)$ | Kinetic energy $= v^\top v/2 = \|v\|^2/2$ (unit mass) |
 | $U(p)$ | Potential energy $= k_1\|p - p_d\|^2/2$ — a quadratic bowl centred on the goal |
 | $k_1 > 0$ | **Position gain** — stiffness of the "spring" pulling toward the goal |
-| $p_d \in \mathbb{R}^n$ | **Desired position** (the goal/target) |
+| p_d ∈ ℝⁿ | **Desired position** (the goal/target) |
 | $\partial L / \partial v$ | Partial derivative of $L$ w.r.t. $v = \partial T/\partial v = v$ (the "momentum" for unit mass) |
 | $\frac{d}{dt}(\partial L / \partial v)$ | Time derivative of momentum $= \dot{v}$ = acceleration |
 | $\partial L / \partial p$ | Partial derivative of $L$ w.r.t. $p = -\partial U/\partial p = -k_1(p - p_d)$ (the restoring force) |
@@ -821,28 +821,28 @@ Every unique variable in the paper in one place:
 |--------|------|---------|---------|
 | $n$ | scalar | given | Dimension of workspace (2 or 3) |
 | $m$ | scalar | given | Number of obstacles |
-| $p$ | $\mathbb{R}^n$ | state | Robot centre position |
-| $v$ | $\mathbb{R}^n$ | state | Robot velocity |
-| $u$ | $\mathbb{R}^n$ | design | Control acceleration (what we compute) |
-| $p_d$ | $\mathbb{R}^n$ | given | Goal/target position |
-| $R$ | $\mathbb{R}_{>0}$ | given | Robot radius |
-| $\mathcal{W}$ | subset of $\mathbb{R}^n$ | given | Workspace (bounded region) |
+| $p$ | ℝⁿ | state | Robot centre position |
+| $v$ | ℝⁿ | state | Robot velocity |
+| $u$ | ℝⁿ | design | Control acceleration (what we compute) |
+| $p_d$ | ℝⁿ | given | Goal/target position |
+| $R$ | ℝ₊ | given | Robot radius |
+| $\mathcal{W}$ | subset of ℝⁿ | given | Workspace (bounded region) |
 | $\mathcal{O}_i$ | subset of $\mathcal{W}$ | given | i-th obstacle |
-| $\mathcal{X}$ | subset of $\mathbb{R}^n$ | Eq. 2 | Free space |
+| $\mathcal{X}$ | subset of ℝⁿ | Eq. 2 | Free space |
 | $\mathcal{X}_\epsilon$ | subset of $\mathcal{X}$ | Eq. 3 | Practical free space (inflated obstacles) |
-| $\epsilon$ | $\mathbb{R}_{>0}$ | Eq. 3 | Safety margin |
-| $h$ | $\mathbb{R}_{>0}$ | Assump. 1 | Positive reach of free space |
-| $\rho$ | $\mathbb{R}_{>0}$ | Assump. 2 | Smoothness radius of distance function |
+| $\epsilon$ | ℝ₊ | Eq. 3 | Safety margin |
+| $h$ | ℝ₊ | Assump. 1 | Positive reach of free space |
+| $\rho$ | ℝ₊ | Assump. 2 | Smoothness radius of distance function |
 | $d(p)$ | scalar | text | Effective distance: $d_{\mathcal{X}^C}(p) - (R + \epsilon)$ |
-| $\eta(p)$ | $\mathbb{R}^n$, $\|\eta\|=1$ | text | Unit normal away from nearest obstacle $= \nabla d_{\mathcal{X}^C}(p)$ |
+| $\eta(p)$ | ℝⁿ, $\|\eta\|=1$ | text | Unit normal away from nearest obstacle $= \nabla d_{\mathcal{X}^C}(p)$ |
 | $\mathbf{H}(p)$ | $n \times n$ matrix | text | Hessian of distance function $= \nabla^2 d_{\mathcal{X}^C}(p)$ |
-| $k_1$ | $\mathbb{R}_{>0}$ | design | Goal-seeking gain (spring stiffness) |
-| $k_2$ | $\mathbb{R}_{>0}$ | design | Velocity damping gain (friction) |
-| $k_3$ | $\mathbb{R}_{>0}$ | design | Avoidance gain (obstacle braking strength) |
-| $\epsilon_1$ | $\mathbb{R}_{>0}$ | Eq. 11 | Inner braking threshold |
-| $\epsilon_2$ | $\mathbb{R}_{>0}$ | Eq. 11 | Outer braking threshold |
-| $\gamma(z)$ | $\mathbb{R}_{\geq 0}$ | Eq. 11 | Proximity scaling function |
-| $\phi(z)$ | $\mathbb{R}$ | Eq. 11 | Cubic blending polynomial |
+| $k_1$ | ℝ₊ | design | Goal-seeking gain (spring stiffness) |
+| $k_2$ | ℝ₊ | design | Velocity damping gain (friction) |
+| $k_3$ | ℝ₊ | design | Avoidance gain (obstacle braking strength) |
+| $\epsilon_1$ | ℝ₊ | Eq. 11 | Inner braking threshold |
+| $\epsilon_2$ | ℝ₊ | Eq. 11 | Outer braking threshold |
+| $\gamma(z)$ | ℝ≥₀ | Eq. 11 | Proximity scaling function |
+| $\phi(z)$ | ℝ | Eq. 11 | Cubic blending polynomial |
 | $D(p,v)$ | scalar $\geq 0$ | Eq. 6 | Total Rayleigh dissipation |
 | $D_s(v)$ | scalar $\geq 0$ | Eq. 7 | Stabilisation dissipation |
 | $D_a(p,v)$ | scalar $\geq 0$ | Eq. 8 | Avoidance dissipation |
@@ -850,7 +850,7 @@ Every unique variable in the paper in one place:
 | $T(v)$ | scalar $\geq 0$ | text | Kinetic energy $= \|v\|^2/2$ |
 | $U(p)$ | scalar $\geq 0$ | text | Potential energy $= k_1\|p - p_d\|^2/2$ |
 | $\mathcal{E}$ | set | Eq. 14 | Undesired equilibrium set |
-| $\mu$ | $\mathbb{R}_{>0}$ | Eq. 14 | Scalar distance from goal to stuck point |
+| $\mu$ | ℝ₊ | Eq. 14 | Scalar distance from goal to stuck point |
 | $\lambda_\mathbf{H}$ | scalar | Eq. 15 | Eigenvalue of $\mathbf{H}$ (principal curvature) |
 | $\mathcal{L}(p,v)$ | scalar $\geq 0$ | Eq. 19 | Lyapunov function $= (k_1/2)\|p-p_d\|^2 + (1/2)\|v\|^2$ |
 | $\dot{d}$ | scalar | Eq. 20 | Rate of change of $d = \eta^\top v$ |
