@@ -1,812 +1,346 @@
 # Control Barrier Functions (CBF) — A Beginner-Friendly Explanation
 
-> **Viewing:** Open in VS Code and press **Cmd+Shift+V** (Mac) or **Ctrl+Shift+V** (Windows) to open the preview with rendered equations.
+> **Viewing:** Open in VS Code and press **Ctrl+Shift+V** to preview with rendered equations. A PDF version with rendered math is also available in this repo.
 
 ---
 
-## The Big Picture
+## The Big Picture — What Is CBF?
 
-Imagine you have a robot that needs to travel from point A to point B while avoiding obstacles. You already have a controller that drives the robot toward the goal (say, a simple PD controller). The problem? That controller knows nothing about obstacles — it will happily steer the robot straight into a wall.
+Imagine you're driving a car toward a destination. You have a GPS telling you where to go — that's your **nominal controller**. But GPS doesn't know about obstacles. So you also have a **co-pilot** who watches the road and grabs the steering wheel *only* when you're about to crash. The rest of the time, the co-pilot sits quietly and lets you drive.
 
-**Control Barrier Functions (CBF)** solve this by acting as a **safety filter**. You design your favourite goal-seeking controller first, then the CBF modifies it *just enough* to guarantee safety — and no more. It's like having a co-pilot who only grabs the steering wheel when you're about to crash, and otherwise lets you drive however you want.
+That co-pilot is the **Control Barrier Function (CBF)**.
 
-The mathematical tool behind CBF is a **Quadratic Program (QP)** — a small optimisation problem solved at every timestep:
+More precisely, CBF is a **safety filter**:
+1. You design any controller you want to reach the goal (the "nominal controller")
+2. At every timestep, CBF checks: "Is this control input safe?"
+3. If yes: use it as-is. CBF does nothing.
+4. If no: CBF tweaks it *just enough* to avoid collision. The smallest possible change.
 
-> "Find the control input $u$ that is as close as possible to what my nominal controller wants, **subject to** the constraint that the robot stays safe."
+The math tool that does step 4 is a **Quadratic Program (QP)** — a small optimisation problem that finds the safe control closest to what you wanted.
 
-This makes CBF fundamentally different from both APF and DAF. APF and DAF *bake* the obstacle avoidance directly into the controller formula. CBF keeps the nominal controller separate and only intervenes when needed.
+### How is CBF different from DAF and APF?
 
-### Key differences at a glance
-
-| Feature | APF (Classical) | DAF (Dissipative) | CBF (Barrier) |
+| | APF | DAF | CBF |
 |---|---|---|---|
-| Avoidance mechanism | Repulsive *force* (pushes away) | Dissipative *braking* (slows down) | Safety *constraint* (filters control) |
-| Depends on | Position only | Position **and** velocity | Position **and** velocity |
-| How it works | Add repulsive force to controller | Add directional braking to controller | Solve QP: minimally modify any controller |
-| Nominal controller | Tightly coupled (built-in) | Tightly coupled (built-in) | **Decoupled** — any controller works |
-| Local minima | Prone to getting stuck | Less likely (but flat walls) | Possible, depends on nominal controller |
-| Computational cost | Cheap (closed-form) | Cheap (closed-form) | Moderate (QP solve per timestep) |
-| Safety guarantee | No formal proof | Proven (Lyapunov + barrier) | Proven (forward invariance) |
-| Extensibility | Hard to add constraints | Hard to add constraints | Easy — add more QP constraints |
+| **What it does** | Pushes robot away from obstacles | Slows robot down near obstacles | Filters your controller for safety |
+| **Avoidance is...** | Baked into the controller | Baked into the controller | A separate layer on top |
+| **Activates when...** | Near obstacle (always) | Near obstacle and approaching | Only when your controller would be unsafe |
+| **Multiple obstacles** | Hard (only nearest) | Hard (only nearest) | Easy — add one constraint per obstacle |
+| **Safety proof** | None | Yes (Lyapunov) | Yes (forward invariance) |
 
 ---
 
-## The Paper's Logic — Before the Equations
+## The Logic Flow — How CBF Is Built
 
-The standard CBF development follows this narrative thread:
+Here's the roadmap. Each step builds on the previous one:
 
-1. **Model the robot** (Eq. 1) — state that the system is control-affine (a common and general robot model).
-2. **Define safety** (Eqs. 2-3) — formalise what "safe" means as a set defined by a function $h(x) \geq 0$.
-3. **Define the barrier function** (Eqs. 4-5) — introduce class $\mathcal{K}$ functions and the CBF condition that enforces safety.
-4. **Handle second-order dynamics** (Eqs. 6-9) — extend CBF to systems where control affects acceleration, not velocity (relative degree 2).
-5. **Design the nominal controller** (Eq. 10) — build a goal-seeking controller independently of safety.
-6. **Formulate the QP** (Eq. 11) — combine the nominal controller with the safety constraint into an optimisation problem.
-7. **Prove safety** (Eqs. 12-13) — show that the safe set is forward invariant (once safe, always safe).
-8. **Handle multiple obstacles** (Eq. 14) — extend to multiple simultaneous safety constraints.
-9. **Apply to obstacle avoidance** (Eqs. 15-17) — specialise the general theory to a robot avoiding obstacles.
-10. **Compare to DAF and APF** (Eqs. 18-19) — benchmark against the other methods.
+1. **Write down the robot model** — "What kind of system are we controlling?"
+2. **Define what 'safe' means** — "Where is the robot allowed to be?"
+3. **Write the safety rule** — "What must the control input satisfy to stay safe?"
+4. **Handle the acceleration problem** — "Our robot controls acceleration, not velocity — we need an extra step"
+5. **Build the QP** — "Find the safest control closest to what we want"
+6. **Prove it works** — "Once safe, always safe"
+
+Let's walk through each step.
 
 ---
 
-## Master Symbol Table
-
-Every symbol used in the CBF framework, grouped by category.
-
-### Spaces and Sets
-
-| Symbol | Type | Meaning |
-|--------|------|---------|
-| $\mathbb{R}$ | set | Real numbers |
-| $\mathbb{R}^n$ | set | n-dimensional Euclidean space |
-| $\mathbb{R}^m$ | set | m-dimensional control input space |
-| $n$ | $\mathbb{N}$ | Dimension of the state space |
-| $m$ | $\mathbb{N}$ | Dimension of the control input |
-| $\mathcal{C}$ | $\subset \mathbb{R}^n$ | **Safe set** — the set of states where $h(x) \geq 0$ |
-| $\partial \mathcal{C}$ | set | **Boundary** of the safe set — where $h(x) = 0$ |
-| $\text{int}(\mathcal{C})$ | set | **Interior** of the safe set — where $h(x) > 0$ |
-| $\mathcal{U}$ | $\subseteq \mathbb{R}^m$ | Set of admissible control inputs |
-
-### State Variables
-
-| Symbol | Type | Meaning |
-|--------|------|---------|
-| $x$ | $\in \mathbb{R}^n$ | **Full state** of the system (e.g., $x = [p^\top, v^\top]^\top$) |
-| $p$ | $\in \mathbb{R}^{n_p}$ | **Position** of the robot's centre |
-| $v$ | $\in \mathbb{R}^{n_p}$ | **Velocity** of the robot ($\dot{p} = v$) |
-| $u$ | $\in \mathbb{R}^m$ | **Control input** — what we command (acceleration for a double integrator) |
-| $\dot{x}$ | $\in \mathbb{R}^n$ | Time derivative of the state |
-| $p_d$ | $\in \mathbb{R}^{n_p}$ | **Desired target position** (the goal) |
-| $R$ | $\in \mathbb{R}_{>0}$ | **Radius** of the robot |
-
-### System Dynamics
-
-| Symbol | Type | Meaning |
-|--------|------|---------|
-| $f(x)$ | $\mathbb{R}^n \to \mathbb{R}^n$ | **Drift dynamics** — how the state evolves with no control input |
-| $g(x)$ | $\mathbb{R}^n \to \mathbb{R}^{n \times m}$ | **Control matrix** — how the control input affects the state |
-| $\dot{x} = f(x) + g(x)u$ | ODE | The **control-affine** system model |
-
-### Barrier Function Variables
-
-| Symbol | Type | Meaning |
-|--------|------|---------|
-| $h(x)$ | $\mathbb{R}^n \to \mathbb{R}$ | **Barrier function** — positive means safe, zero means boundary, negative means unsafe |
-| $\dot{h}(x, u)$ | $\mathbb{R}$ | Time derivative of $h$ along the system trajectory |
-| $L_f h(x)$ | $\mathbb{R}$ | **Lie derivative** of $h$ along $f$: $\nabla h(x)^\top f(x)$ — how $h$ changes due to drift |
-| $L_g h(x)$ | $\mathbb{R}^{1 \times m}$ | **Lie derivative** of $h$ along $g$: $\nabla h(x)^\top g(x)$ — how control affects $h$ |
-| $\nabla h(x)$ | $\mathbb{R}^n$ | **Gradient** of $h$ — points in the direction of increasing safety |
-| $\alpha(\cdot)$ | function | **Extended class $\mathcal{K}_\infty$ function** — controls how aggressively safety is enforced |
-
-### Design Parameters
-
-| Symbol | Type | Meaning | Typical Value |
-|--------|------|---------|---------------|
-| $k_1$ | $\mathbb{R}_{>0}$ | Position gain for the nominal PD controller | 1-5 |
-| $k_2$ | $\mathbb{R}_{>0}$ | Velocity damping gain for nominal controller | 2-4 |
-| $\alpha_0$ | $\mathbb{R}_{>0}$ | CBF enforcement strength (when $\alpha(h) = \alpha_0 h$) | 1-10 |
-| $\alpha_1, \alpha_2$ | $\mathbb{R}_{>0}$ | ECBF pole placement parameters for second-order systems | 1-5 |
-| $\epsilon$ | $\mathbb{R}_{>0}$ | Safety margin beyond robot radius | 0.06 |
-
-### Obstacle Variables
-
-| Symbol | Type | Meaning |
-|--------|------|---------|
-| $p_o$ | $\in \mathbb{R}^{n_p}$ | Position of obstacle centre |
-| $r_o$ | $\in \mathbb{R}_{>0}$ | Radius of obstacle (for circular obstacles) |
-| $d(p)$ | $\mathbb{R}$ | Distance from robot surface to obstacle surface |
-| $\eta(p)$ | $\in \mathbb{R}^{n_p}$, $\|\eta\|=1$ | Unit vector pointing from obstacle toward robot |
-| $N_{obs}$ | $\mathbb{N}$ | Number of obstacles |
-
-### QP Variables
-
-| Symbol | Type | Meaning |
-|--------|------|---------|
-| $u_{\text{nom}}$ | $\in \mathbb{R}^m$ | **Nominal control** — what the goal-seeking controller wants |
-| $u^*$ | $\in \mathbb{R}^m$ | **Optimal control** — output of the QP (safe version of $u_{\text{nom}}$) |
-| $\|u - u_{\text{nom}}\|^2$ | $\mathbb{R}_{\geq 0}$ | **Cost function** — deviation from nominal (minimised by QP) |
-
----
-
-## Every Equation Explained
-
----
-
-### Equation (1) — Control-affine system dynamics
+## Step 1 — The Robot Model
 
 $$\dot{x} = f(x) + g(x)\, u$$
 
-**Why it's here:** Before defining safety, we need to say what kind of system we're controlling. CBF theory requires the system to be **control-affine** — the control input $u$ enters the dynamics linearly. This is a broad class that includes most robots.
+**In plain English:** The robot's state $x$ changes over time due to two things:
+- $f(x)$: what happens naturally (like gravity, or coasting at current velocity)
+- $g(x) \cdot u$: what we command (our control input)
 
-**What it is:** The general model of a nonlinear system where the state $x$ evolves under drift $f(x)$ (what happens with no input) plus the effect of the control $g(x) u$.
+The key requirement is that $u$ enters **linearly** — no $u^2$ or $\sin(u)$. This is what makes the QP solvable.
 
-**Intuition:** Think of $f(x)$ as gravity or friction — forces that act regardless of what you do. And $g(x) u$ as your thrusters or motors — forces you choose. The key requirement is that $u$ enters **linearly** (no $u^2$ or $\sin(u)$ terms). This is what makes the QP in Eq. 11 tractable.
-
-**Variable drill-down:**
-
-| Variable | Dimension | What it is here |
-|----------|-----------|-----------------|
-| $x \in \mathbb{R}^n$ | $n$ | Full state vector. For a robot: $x = [p^\top, v^\top]^\top$ (position and velocity stacked). |
-| $\dot{x} \in \mathbb{R}^n$ | $n$ | Time derivative of the state — how it changes. |
-| $f(x)$ | $n \times 1$ | **Drift** — the dynamics when $u = 0$. For a double integrator: $f(x) = [v^\top, 0^\top]^\top$ (position changes at rate $v$, velocity doesn't change on its own). |
-| $g(x)$ | $n \times m$ | **Input matrix** — maps control to state change. For a double integrator: $g(x) = [0; I]$ (control affects velocity, not position directly). |
-| $u \in \mathbb{R}^m$ | $m$ | Control input. For a robot in 2D: $u = [u_x, u_y]^\top$ (acceleration command). |
-
-**For a double integrator robot** (the same model as DAF's Eq. 5):
+**For our robot** (same as DAF), the state is position and velocity stacked together:
 
 $$x = \begin{bmatrix} p \\ v \end{bmatrix}, \quad f(x) = \begin{bmatrix} v \\ 0 \end{bmatrix}, \quad g(x) = \begin{bmatrix} 0 \\ I \end{bmatrix}$$
 
-This gives $\dot{p} = v$ and $\dot{v} = u$, identical to DAF.
+This just says: position changes at rate $v$, and velocity changes at rate $u$ (Newton's law for unit mass).
+
+| Symbol | Meaning |
+|--------|---------|
+| $x$ | Full state (position + velocity stacked) |
+| $p$ | Position of the robot |
+| $v$ | Velocity of the robot |
+| $u$ | Control input — the acceleration we choose |
+| $f(x)$ | "Drift" — what happens with no control |
+| $g(x)$ | How our control affects the state |
 
 ---
 
-### Equation (2) — The safe set
+## Step 2 — Defining "Safe"
 
-$$\mathcal{C} = \{x \in \mathbb{R}^n : h(x) \geq 0\}$$
+We need a mathematical way to say "the robot hasn't crashed." We do this by picking a function $h(x)$ such that:
 
-**Why it's here:** Safety needs a precise mathematical definition. Instead of vaguely saying "don't hit obstacles," we define a specific region of state space where the robot is safe. The entire CBF machinery exists to keep $x(t)$ inside this set for all time.
+$$h(x) \geq 0 \quad \Longleftrightarrow \quad \text{the robot is safe}$$
 
-**What it is:** The safe set — the collection of all states where the barrier function $h$ is non-negative.
+The **safe set** is everything where $h$ is non-negative:
 
-**Intuition:** Draw a line around all the "good" states. Everything inside (where $h > 0$) is safe. The boundary ($h = 0$) is the edge of safety. Outside ($h < 0$) is collision. The CBF's job is to ensure the system never crosses from inside to outside.
+$$\mathcal{C} = \{x : h(x) \geq 0\}$$
 
-**Variable drill-down:**
+Think of $h$ as a "safety score":
+- $h > 0$: safe (positive score = good)
+- $h = 0$: on the edge of safety (score is zero = be careful)
+- $h < 0$: collision! (negative score = bad)
 
-| Variable | What it is here |
-|----------|----------------|
-| $\mathcal{C}$ | The **safe set** — all states that are acceptable |
-| $x$ | Any candidate state |
-| $h(x)$ | The barrier function evaluated at $x$ — a single number that tells you "how safe" you are |
-| $h(x) \geq 0$ | The safety condition — non-negative means safe |
-| $h(x) = 0$ | The boundary $\partial \mathcal{C}$ — the robot is at the edge of safety |
-| $h(x) > 0$ | The interior $\text{int}(\mathcal{C})$ — the robot is strictly safe |
-| $h(x) < 0$ | **Unsafe** — collision has occurred or is imminent |
+### Choosing $h$ for obstacle avoidance
 
-**Key insight:** The choice of $h$ is a design decision. Different choices of $h$ define different safe sets. For obstacle avoidance, a natural choice is $h(p) = \|p - p_o\|^2 - (R + r_o)^2$ (positive when the robot is far enough from the obstacle).
-
----
-
-### Equation (3) — The barrier function for obstacle avoidance
+For a circular robot (radius $R$) avoiding a circular obstacle (radius $r_o$) with centre at $p_o$:
 
 $$h(p) = \|p - p_o\|^2 - (R + r_o + \epsilon)^2$$
 
-**Why it's here:** Equation (2) defined safety abstractly. Now we specialise to obstacle avoidance by choosing a concrete $h$. This particular choice encodes "the robot's centre must be at least $R + r_o + \epsilon$ away from the obstacle centre."
+**What this says:** Take the squared distance between the robot and obstacle centres, and subtract the squared minimum allowed distance. If the result is positive, they're far enough apart.
 
-**What it is:** A barrier function for a circular robot avoiding a circular obstacle, with a safety margin.
+We use squared distance (instead of plain distance) because it makes the derivatives cleaner — no square roots.
 
-**Intuition:** Picture two circles — the robot (radius $R$) and the obstacle (radius $r_o$). They collide when their centres are closer than $R + r_o$. We add a margin $\epsilon$ for extra safety. So:
-- $h > 0$: the circles are separated (safe)
-- $h = 0$: the circles are just touching (boundary)
-- $h < 0$: the circles overlap (collision)
+| Symbol | Meaning |
+|--------|---------|
+| $h(p)$ | Safety score — positive means safe |
+| $p$ | Robot position |
+| $p_o$ | Obstacle centre |
+| $\|p - p_o\|$ | Distance between centres |
+| $R + r_o + \epsilon$ | Minimum allowed distance (robot radius + obstacle radius + safety margin) |
 
-We use the **squared** distance $\|p - p_o\|^2$ instead of $\|p - p_o\|$ because: (a) it avoids a square root, making derivatives cleaner, and (b) the gradient $\nabla h$ is well-defined everywhere (no $0/0$ issue at $p = p_o$).
-
-**Variable drill-down:**
-
-| Variable | What it is here |
-|----------|----------------|
-| $h(p)$ | Barrier function — positive means no collision |
-| $p \in \mathbb{R}^{n_p}$ | Robot centre position |
-| $p_o \in \mathbb{R}^{n_p}$ | Obstacle centre position |
-| $\|p - p_o\|^2$ | Squared Euclidean distance between centres: $(p_x - p_{o,x})^2 + (p_y - p_{o,y})^2$ |
-| $R$ | Robot radius |
-| $r_o$ | Obstacle radius |
-| $\epsilon$ | Safety margin (same role as in DAF) |
-| $(R + r_o + \epsilon)^2$ | Squared minimum allowed distance between centres |
-
-**For a flat wall** at position $x = x_w$ (to compare with the DAF wall simulation):
-
-$$h(p) = (p_x - x_w)^2 - (R + \epsilon)^2$$
-
-or equivalently using signed distance:
-
-$$h(p) = d(p) \cdot (d(p) + 2(R + \epsilon))$$
-
-where $d(p) = |p_x - x_w| - (R + \epsilon)$ is the effective distance (same as DAF's $d(p)$).
+**For a flat wall** at position $x_w$, you'd use: $h(p) = (p_x - x_w)^2 - (R + \epsilon)^2$
 
 ---
 
-### Equation (4) — Extended class $\mathcal{K}_\infty$ function
+## Step 3 — The Safety Rule (CBF Condition)
 
-$$\alpha : \mathbb{R} \to \mathbb{R}, \quad \text{strictly increasing}, \quad \alpha(0) = 0$$
+The core idea: **don't let $h$ decrease too fast.** If $h$ can never reach zero, the robot never crashes.
 
-**Why it's here:** The CBF condition (Eq. 5) uses a function $\alpha$ to control *how aggressively* safety is enforced. A steep $\alpha$ means the CBF intervenes strongly when $h$ is small; a gentle $\alpha$ means it waits until the last moment. The class $\mathcal{K}_\infty$ requirement ensures the function behaves sensibly.
+### First attempt (first-order systems)
 
-**What it is:** A function that passes through the origin, is strictly increasing, and is unbounded in both directions.
-
-**Intuition:** Think of $\alpha$ as the CBF's "personality":
-- $\alpha(h) = \alpha_0 \cdot h$ (linear): the most common choice. Aggressive enforcement — proportional to how far from the boundary you are. Like a spring that pulls you back harder the closer you get.
-- $\alpha(h) = \alpha_0 \cdot h^3$ (cubic): gentler near the boundary, more aggressive far away.
-- Large $\alpha_0$: very aggressive — the CBF allows the robot to get very close to obstacles because it's confident it can stop in time.
-- Small $\alpha_0$: conservative — keeps a larger buffer.
-
-**Variable drill-down:**
-
-| Variable | What it is here |
-|----------|----------------|
-| $\alpha(\cdot)$ | The class $\mathcal{K}_\infty$ function — a design choice |
-| $\alpha(0) = 0$ | When $h = 0$ (at the boundary), the right-hand side of the CBF condition is zero — the constraint is tightest |
-| $\alpha(h) > 0$ when $h > 0$ | When safe, the constraint allows some decrease in $h$ |
-| $\alpha(h) < 0$ when $h < 0$ | When unsafe, the constraint forces $h$ to increase (recover) |
-| "strictly increasing" | More safety margin ($h$ larger) = more freedom to decrease $h$ |
-
-**Common choices:**
-
-| $\alpha(h)$ | Name | Behavior |
-|-------------|------|----------|
-| $\alpha_0 \cdot h$ | Linear | Proportional enforcement, most popular |
-| $\alpha_0 \cdot h^3$ | Cubic | Gentler near boundary |
-| $\alpha_0 \cdot \tanh(h)$ | Saturating | Caps the allowed decrease rate |
-
----
-
-### Equation (5) — The CBF condition (first-order)
-
-$$L_f h(x) + L_g h(x)\, u + \alpha(h(x)) \geq 0$$
-
-**Why it's here:** This is the **core** of CBF theory — the single inequality that guarantees safety. If the control input $u$ satisfies this condition at every instant, then $h(x(t)) \geq 0$ for all future time (the safe set is **forward invariant**). Everything else in the CBF framework exists to support or extend this one condition.
-
-**What it is:** A constraint on the control input $u$ that ensures $h$ doesn't decrease too fast.
-
-**Intuition — step by step:**
-
-The time derivative of $h$ along the system trajectory is:
-
-$$\dot{h}(x, u) = \nabla h(x)^\top \dot{x} = \nabla h(x)^\top [f(x) + g(x)u] = L_f h(x) + L_g h(x)\, u$$
-
-The CBF condition says:
+If we could directly control velocity ($\dot{p} = u$), the rule would be:
 
 $$\dot{h} \geq -\alpha(h)$$
 
-In words: "$h$ is allowed to decrease, but not faster than $\alpha(h)$." Since $\alpha(h) > 0$ when $h > 0$, the allowed rate of decrease shrinks as $h$ approaches zero. At $h = 0$ (the boundary), $\alpha(0) = 0$, so $\dot{h} \geq 0$ — the system can't cross the boundary.
+where $\alpha$ is a positive function with $\alpha(0) = 0$. Usually just $\alpha(h) = \alpha_0 \cdot h$ (linear).
 
-**Analogy:** Imagine driving toward a cliff. The CBF condition says: "You can accelerate toward the cliff, but only slowly enough that you could still brake in time." The closer you get, the tighter the speed limit, until at the edge you're required to be moving away or stopped.
+**What this means:**
+- When $h$ is large (far from obstacle): $\alpha(h)$ is large, so $\dot{h}$ can be quite negative — you're allowed to approach fast.
+- When $h$ is small (close to obstacle): $\alpha(h)$ is small, so $\dot{h}$ must be close to zero — slow down!
+- When $h = 0$ (at the boundary): $\dot{h} \geq 0$ — you must be moving away or standing still. No crossing allowed.
 
-**Variable drill-down:**
+**The function $\alpha$ is like a speed limit** that gets stricter the closer you are to the edge.
 
-| Variable | Type | What it is here |
-|----------|------|-----------------|
-| $L_f h(x)$ | Scalar | **Lie derivative along $f$**: $\nabla h(x)^\top f(x)$. How $h$ changes due to drift alone (no control). |
-| $L_g h(x)$ | $1 \times m$ row vector | **Lie derivative along $g$**: $\nabla h(x)^\top g(x)$. How control affects $h$. |
-| $L_g h(x) \cdot u$ | Scalar | The dot product — how much the chosen control $u$ contributes to $\dot{h}$. |
-| $\alpha(h(x))$ | Scalar | The "allowed decrease rate" — bigger means more freedom. |
-| $\nabla h(x)$ | $n \times 1$ | Gradient of $h$ — direction of steepest increase in safety. |
-| $\geq 0$ | Constraint | The whole left side must be non-negative: $\dot{h} + \alpha(h) \geq 0$, i.e., $\dot{h} \geq -\alpha(h)$. |
+### What is $\dot{h}$?
 
-**Why this guarantees safety:** If $\dot{h} \geq -\alpha(h)$ always, then by comparison with the ODE $\dot{z} = -\alpha(z)$ (which has the solution $z(t) \geq 0$ for $z(0) \geq 0$ since $\alpha(0) = 0$), we get $h(x(t)) \geq 0$ for all $t$. This is Nagumo's theorem applied to the safe set.
+Using the chain rule and our system model:
 
----
+$$\dot{h} = \underbrace{\nabla h^\top f(x)}_{L_f h} + \underbrace{\nabla h^\top g(x)}_{L_g h} \cdot u$$
 
-### Equation (6) — The relative degree problem
+The terms $L_f h$ and $L_g h$ are called **Lie derivatives** — fancy names for "how $h$ changes due to drift" and "how $h$ changes due to control."
 
-$$L_g h(x) = 0 \quad \forall x \in \mathcal{C}$$
+So the safety rule becomes:
 
-**Why it's here:** For a double integrator robot ($\dot{p} = v$, $\dot{v} = u$), the barrier function $h(p)$ depends only on position, but control $u$ affects acceleration. This means $u$ doesn't appear in $\dot{h}$ — you can't directly constrain $u$ using Eq. 5. The system has **relative degree 2**: you need to differentiate $h$ twice before $u$ appears.
+$$L_f h + L_g h \cdot u + \alpha(h) \geq 0$$
 
-**What it is:** The condition that signals the first-order CBF approach (Eq. 5) won't work directly.
-
-**Intuition:** If $h$ depends only on $p$ and $u$ affects $v$, then:
-
-$$\dot{h} = \nabla_p h \cdot \dot{p} = \nabla_p h \cdot v$$
-
-No $u$ anywhere! The control input has no *direct* effect on $\dot{h}$. It's like trying to stop a car by controlling the engine: the engine controls acceleration, acceleration controls velocity, and velocity controls position. You need two steps, not one.
-
-**Variable drill-down:**
-
-| Variable | What it is here |
-|----------|----------------|
-| $L_g h(x) = \nabla h^\top g(x)$ | For $h = h(p)$ and $g = [0; I]$: $\nabla h = [\nabla_p h; 0]$, so $\nabla h^\top g = 0^\top I = 0$ |
-| "Relative degree 2" | $u$ appears in $\ddot{h}$ but not in $\dot{h}$ — need to differentiate twice |
-
-This motivates the Exponential CBF (ECBF) approach in the next equations.
+This is a **linear inequality in $u$** — easy to enforce!
 
 ---
 
-### Equation (7) — Second derivative of the barrier function
+## Step 4 — The Acceleration Problem (Relative Degree 2)
 
-$$\ddot{h} = \frac{\partial \dot{h}}{\partial x}(f(x) + g(x) u) = L_f^2 h(x) + L_g L_f h(x)\, u$$
+Here's the catch: our robot controls **acceleration** ($\dot{v} = u$), not velocity directly. And our barrier function $h(p)$ depends on **position**.
 
-**Why it's here:** Since $u$ doesn't appear in $\dot{h}$ (Eq. 6), we differentiate again. Now $u$ appears in $\ddot{h}$, so we can constrain it.
+So when we compute $\dot{h}$:
 
-**What it is:** The second time derivative of $h$ along the system trajectory, expanded using Lie derivatives.
+$$\dot{h} = \nabla_p h \cdot v$$
 
-**Intuition:** Continuing the car analogy: $h$ is distance to cliff, $\dot{h}$ is how fast the distance changes (depends on velocity), $\ddot{h}$ is how fast $\dot{h}$ changes (depends on acceleration = control). Now we can say: "choose acceleration $u$ so that $\ddot{h}$ satisfies some condition."
+**There's no $u$ in there!** Velocity appears, but not the control. We can't constrain something that doesn't show up.
 
-**Variable drill-down:**
+This is called **relative degree 2**: we need to differentiate $h$ **twice** before $u$ appears:
 
-| Variable | Type | What it is here |
-|----------|------|-----------------|
-| $\ddot{h}$ | Scalar | Second time derivative of $h$ — how the rate-of-change of safety is changing |
-| $L_f^2 h(x)$ | Scalar | Lie derivative of $L_f h$ along $f$. The part of $\ddot{h}$ that doesn't depend on $u$. |
-| $L_g L_f h(x)$ | $1 \times m$ row vector | Lie derivative of $L_f h$ along $g$. How $u$ affects $\ddot{h}$. For a double integrator with $h = \|p - p_o\|^2 - r^2$: this equals $2(p - p_o)^\top$. |
-
-**For the obstacle avoidance barrier** $h = \|p - p_o\|^2 - r_{\text{safe}}^2$:
-
-$$\dot{h} = 2(p - p_o)^\top v$$
 $$\ddot{h} = 2\|v\|^2 + 2(p - p_o)^\top u$$
 
-Now $u$ appears explicitly. $L_f^2 h = 2\|v\|^2$ and $L_g L_f h = 2(p - p_o)^\top$.
-
----
-
-### Equation (8) — Exponential CBF (ECBF) condition
+Now $u$ is there! So we write the safety rule on $\ddot{h}$ instead:
 
 $$\ddot{h} + \alpha_1 \dot{h} + \alpha_2 h \geq 0$$
 
-equivalently:
+This is called the **Exponential CBF (ECBF)** condition.
 
-$$L_f^2 h + L_g L_f h \cdot u + \alpha_1 (L_f h) + \alpha_2 h \geq 0$$
-
-**Why it's here:** We need a condition on $u$ (which appears in $\ddot{h}$) that keeps $h \geq 0$. The ECBF approach treats $h$ like a damped spring: the condition $\ddot{h} + \alpha_1 \dot{h} + \alpha_2 h \geq 0$ ensures $h$ behaves at least as well as the solution to $\ddot{z} + \alpha_1 \dot{z} + \alpha_2 z = 0$, which stays non-negative if the "poles" are chosen correctly.
-
-**What it is:** The second-order CBF constraint — a linear inequality in $u$ that guarantees safety for systems with relative degree 2.
-
-**Intuition:** The condition shapes how $h$ can evolve over time:
-- $\alpha_2 h$ term: when $h$ is large (far from obstacle), allows more freedom
-- $\alpha_1 \dot{h}$ term: when $\dot{h} < 0$ (approaching obstacle), tightens the constraint
-- Together: they ensure $h(t)$ decays no faster than $e^{-\lambda t}$ where $\lambda$ depends on $\alpha_1, \alpha_2$
+**Think of it like a spring:** the equation $\ddot{h} + \alpha_1 \dot{h} + \alpha_2 h \geq 0$ ensures $h(t)$ behaves at least as well as a damped spring that never goes negative. The parameters $\alpha_1$ and $\alpha_2$ are the damping and stiffness.
 
 **Choosing $\alpha_1$ and $\alpha_2$:**
+- Both must be positive
+- Need $\alpha_1^2 \geq 4\alpha_2$ for guaranteed safety (real poles)
+- Larger values = more conservative (intervenes earlier)
+- Smaller values = more aggressive (waits longer, gets closer to obstacles)
 
-The characteristic equation is $s^2 + \alpha_1 s + \alpha_2 = 0$. For $h(t) \geq 0$ to be guaranteed:
-- Both roots must be **real and negative**: $\alpha_1^2 \geq 4\alpha_2$ and $\alpha_1, \alpha_2 > 0$
-- Roots $= \frac{-\alpha_1 \pm \sqrt{\alpha_1^2 - 4\alpha_2}}{2}$
-- Larger $\alpha_1, \alpha_2$ = more aggressive enforcement (intervenes earlier)
+### Expanding for our specific robot + circular obstacle:
 
-**Variable drill-down:**
+Plugging in $h = \|p - p_o\|^2 - r_{\text{safe}}^2$, $\dot{h} = 2(p-p_o)^\top v$, and $\ddot{h} = 2\|v\|^2 + 2(p-p_o)^\top u$:
 
-| Variable | What it is here |
-|----------|----------------|
-| $\ddot{h}$ | Second derivative of $h$ — contains $u$ (Eq. 7) |
-| $\alpha_1 > 0$ | **Damping coefficient** — controls how fast the approach rate $\dot{h}$ is damped |
-| $\alpha_2 > 0$ | **Stiffness coefficient** — controls how strongly the constraint reacts to $h$ itself |
-| $\alpha_1 \dot{h}$ | Penalises rapid approach ($\dot{h} \ll 0$). Acts like velocity damping. |
-| $\alpha_2 h$ | Provides freedom proportional to safety margin. When $h$ is large, the robot has more room. |
-| $\geq 0$ | The constraint — this is what goes into the QP as a linear inequality in $u$ |
+$$2(p - p_o)^\top u \geq -\Big(2\|v\|^2 + 2\alpha_1 (p - p_o)^\top v + \alpha_2 h(p)\Big)$$
 
-**Key insight:** Substituting $\ddot{h} = L_f^2 h + L_g L_f h \cdot u$ gives a constraint of the form $A u \geq b$, which is a **linear inequality** in $u$. This is exactly what a QP can handle efficiently.
+This is one linear inequality in $u$. That's it — that's the safety constraint.
 
----
-
-### Equation (9) — ECBF constraint expanded for a double integrator
-
-$$2(p - p_o)^\top u \geq -(2\|v\|^2 + 2\alpha_1 (p - p_o)^\top v + \alpha_2(\|p - p_o\|^2 - r_{\text{safe}}^2))$$
-
-**Why it's here:** This is Eq. 8 fully expanded for the specific case of a double integrator robot avoiding a circular obstacle. This is the **implementable** constraint — the thing you code up and pass to the QP solver.
-
-**What it is:** A single linear inequality in $u$ that guarantees the robot never collides with the obstacle.
-
-**Intuition — piece by piece:**
-
-| Piece | Formula | Meaning |
-|-------|---------|---------|
-| Left side | $2(p - p_o)^\top u$ | Component of control acceleration in the direction away from obstacle. "How much are you pushing away?" |
-| $2\|v\|^2$ | Velocity magnitude term | Always positive — faster robot needs more room to brake |
-| $2\alpha_1 (p - p_o)^\top v$ | Approach rate term | Negative when approaching — tightens the constraint. "You're heading toward it — brake harder." |
-| $\alpha_2(\|p - p_o\|^2 - r_{\text{safe}}^2)$ | Proximity term ($= \alpha_2 h$) | Positive when safe — loosens constraint. "You have margin — relax." |
-
-**Variable drill-down:**
-
-| Variable | What it is here |
-|----------|----------------|
-| $(p - p_o)$ | Vector from obstacle to robot ($n_p \times 1$) |
-| $(p - p_o)^\top u$ | Scalar: component of acceleration away from obstacle |
-| $\|v\|^2$ | Squared speed ($= v^\top v$) |
-| $(p - p_o)^\top v$ | Scalar: $= \dot{h}/2$ — rate of change of separation. Negative = approaching. |
-| $r_{\text{safe}}$ | $= R + r_o + \epsilon$ — minimum allowed centre-to-centre distance |
-| $\|p - p_o\|^2 - r_{\text{safe}}^2$ | $= h(p)$ — the barrier function value |
+| Piece | Formula | What it means |
+|-------|---------|---------------|
+| Left side | $2(p - p_o)^\top u$ | "How much are you accelerating away from the obstacle?" |
+| $2\|v\|^2$ | Speed term | Faster robot needs more room to brake |
+| $2\alpha_1 (p-p_o)^\top v$ | Approach rate | Negative when heading toward obstacle — tightens constraint |
+| $\alpha_2 h(p)$ | Safety margin | Positive when safe — loosens constraint |
 
 ---
 
-### Equation (10) — Nominal controller (PD)
+## Step 5 — The QP (Putting It All Together)
 
-$$u_{\text{nom}} = -k_1(p - p_d) - k_2 v$$
+Now we have two things:
+1. A **nominal controller** that drives toward the goal: $u_{\text{nom}} = -k_1(p - p_d) - k_2 v$
+2. A **safety constraint** that prevents collision (from Step 4)
 
-**Why it's here:** CBF is a **safety filter** — it modifies an existing controller. This equation defines that "existing controller." It's a simple PD (Proportional-Derivative) controller that drives the robot toward the goal. Without the CBF, this controller would ignore obstacles entirely.
-
-**What it is:** A goal-seeking acceleration command with no obstacle awareness.
-
-**Intuition:** Identical to DAF's first two terms:
-- $-k_1(p - p_d)$: spring pulling toward goal (stronger when far away)
-- $-k_2 v$: friction slowing the robot (prevents oscillation)
-
-This is the controller the robot *wants* to use. The CBF's job is to modify it as little as possible to stay safe.
-
-**Variable drill-down:**
-
-| Variable | What it is here |
-|----------|----------------|
-| $u_{\text{nom}}$ | **Nominal control** — the "desired" acceleration before safety filtering |
-| $k_1$ | Position gain — spring stiffness toward goal |
-| $k_2$ | Velocity gain — damping coefficient |
-| $p - p_d$ | Error vector from goal to robot |
-| $v$ | Current velocity |
-
-**Comparison to DAF (Eq. 13):** DAF's controller is $u = -k_1(p - p_d) - k_2 v - k_3 \gamma \eta \eta^\top v$. The first two terms are exactly $u_{\text{nom}}$. DAF bakes the avoidance into the third term; CBF handles it separately via the QP.
-
----
-
-### Equation (11) — The CBF-QP (Quadratic Program)
-
-$$u^* = \underset{u \in \mathbb{R}^m}{\arg\min} \quad \|u - u_{\text{nom}}\|^2$$
-$$\text{subject to:} \quad L_f^2 h(x) + L_g L_f h(x)\, u + \alpha_1 \dot{h} + \alpha_2 h \geq 0$$
-
-**Why it's here:** This is the **engine** of the CBF approach — the thing that runs at every timestep. It takes the nominal controller's desire ($u_{\text{nom}}$) and finds the closest safe alternative ($u^*$). This is where the "minimal intervention" philosophy is implemented mathematically.
-
-**What it is:** An optimisation problem: minimise deviation from the desired control, subject to the safety constraint.
-
-**Intuition:** Imagine two people holding a steering wheel:
-- The **nominal controller** wants to go straight toward the goal
-- The **CBF** checks if that's safe
-- If safe: $u^* = u_{\text{nom}}$ (CBF doesn't intervene at all)
-- If unsafe: $u^*$ is the closest control to $u_{\text{nom}}$ that satisfies the safety constraint
-
-Because the cost is quadratic ($\|\cdot\|^2$) and the constraint is linear in $u$, this QP has a **closed-form solution** for a single constraint:
-
-$$u^* = \begin{cases} u_{\text{nom}}, & \text{if constraint satisfied by } u_{\text{nom}} \\ u_{\text{nom}} + \frac{(\text{violation})}{L_g L_f h \cdot (L_g L_f h)^\top} (L_g L_f h)^\top, & \text{otherwise} \end{cases}$$
-
-In words: project $u_{\text{nom}}$ onto the feasible half-space defined by the constraint.
-
-**Variable drill-down:**
-
-| Variable | What it is here |
-|----------|----------------|
-| $u^*$ | The **optimal safe control** — what the robot actually executes |
-| $\arg\min$ | "The value of $u$ that minimises..." |
-| $\|u - u_{\text{nom}}\|^2$ | Squared deviation — the QP minimises this. Equal weight on all control dimensions. |
-| "subject to" | The constraint that must be satisfied — the ECBF condition from Eq. 8 |
-| $L_f^2 h + L_g L_f h \cdot u + \alpha_1 \dot{h} + \alpha_2 h$ | The left side of the safety constraint — linear in $u$ |
-
-**Key insight:** The QP is solved at every timestep (e.g., every 1ms). For a single obstacle (one constraint, $m$ variables), the solution is a simple projection — no iterative solver needed. For multiple obstacles, a general QP solver (like `scipy.optimize.minimize` or OSQP) is used.
-
----
-
-### Equation (12) — Forward invariance (safety guarantee)
-
-$$h(x(0)) \geq 0 \implies h(x(t)) \geq 0 \quad \forall t \geq 0$$
-
-**Why it's here:** This is the **main theorem** — the payoff of the entire CBF framework. If the system starts safe and the control always satisfies the CBF condition (Eq. 5 or 8), then the system stays safe forever. No collisions, guaranteed.
-
-**What it is:** The forward invariance property of the safe set $\mathcal{C}$.
-
-**Intuition:** Once inside the safe set, you can never leave. The CBF condition acts like a one-way door — the constraint at the boundary ($h = 0$) requires $\dot{h} \geq 0$, meaning the state can only move inward or stay on the boundary.
-
-**Variable drill-down:**
-
-| Variable | What it is here |
-|----------|----------------|
-| $h(x(0)) \geq 0$ | The system starts in the safe set |
-| $h(x(t)) \geq 0 \; \forall t$ | The system stays in the safe set for all future time |
-| $\implies$ | Logical implication — if the left is true, the right is guaranteed |
-
-**Proof sketch (Nagumo's theorem):** The CBF condition ensures $\dot{h} \geq -\alpha(h)$ always. Consider what happens at the boundary ($h = 0$): $\dot{h} \geq -\alpha(0) = 0$, so $h$ can't decrease — the state can't cross the boundary. By induction on the flow, $h(x(t)) \geq 0$ for all $t$.
-
-**Comparison to DAF:** DAF proves safety using a Lyapunov function $\mathcal{L}$ that always decreases (Eq. 20) combined with a barrier term $\Phi$ that blows up at $d = 0$. CBF proves safety using Nagumo's theorem — a more direct "the set is invariant" argument. Both are valid but conceptually different.
-
----
-
-### Equation (13) — Feasibility condition
-
-$$L_g L_f h(x) \neq 0 \quad \forall x \in \partial \mathcal{C}$$
-
-**Why it's here:** The QP (Eq. 11) can only guarantee safety if the constraint is **feasible** — there must exist some $u$ that satisfies it. If $L_g L_f h = 0$ at a point on the boundary, control has no effect on $\ddot{h}$ there, and the QP may be infeasible.
-
-**What it is:** A regularity condition ensuring the control can always influence safety.
-
-**Intuition:** If $L_g L_f h = 0$, the control input $u$ has no effect on how $h$ changes — it's like having a steering wheel that does nothing at the exact moment you need to turn. For obstacle avoidance with $h = \|p - p_o\|^2 - r^2$, we have $L_g L_f h = 2(p - p_o)^\top$, which is zero only when $p = p_o$ (robot is inside the obstacle). Since we start safe, this never happens.
-
-**Variable drill-down:**
-
-| Variable | What it is here |
-|----------|----------------|
-| $L_g L_f h(x)$ | The "control effectiveness" for safety — how much $u$ can influence $\ddot{h}$ |
-| $\neq 0$ | Must be nonzero — otherwise the QP has no way to enforce the constraint |
-| $\partial \mathcal{C}$ | The boundary — this is where feasibility matters most (the constraint is tightest there) |
-
----
-
-### Equation (14) — Multiple obstacle extension
-
-$$u^* = \underset{u \in \mathbb{R}^m}{\arg\min} \quad \|u - u_{\text{nom}}\|^2$$
-$$\text{s.t.} \quad L_f^2 h_i + L_g L_f h_i \cdot u + \alpha_1 \dot{h}_i + \alpha_2 h_i \geq 0, \quad i = 1, \ldots, N_{obs}$$
-
-**Why it's here:** Real environments have multiple obstacles. CBF handles this elegantly — just add one constraint per obstacle to the QP. This is a major advantage over DAF and APF, which only track the nearest obstacle and must switch between them.
-
-**What it is:** The QP with one ECBF constraint per obstacle.
-
-**Intuition:** Each obstacle gets its own "safety vote." The QP finds the control that:
-1. Stays as close as possible to what the nominal controller wants
-2. Satisfies **all** safety constraints simultaneously
-
-If constraints conflict (e.g., two obstacles on opposite sides), the QP finds the best compromise. If no feasible $u$ exists (completely boxed in), the QP is infeasible — this corresponds to a physically impossible scenario.
-
-**Variable drill-down:**
-
-| Variable | What it is here |
-|----------|----------------|
-| $h_i$ | Barrier function for obstacle $i$: $h_i = \|p - p_{o,i}\|^2 - r_{\text{safe},i}^2$ |
-| $N_{obs}$ | Total number of obstacles |
-| "s.t." | "Subject to" — all constraints must hold simultaneously |
-| $i = 1, \ldots, N_{obs}$ | One constraint per obstacle |
-
-**Computational note:** With $N_{obs}$ obstacles, the QP has $m$ variables and $N_{obs}$ inequality constraints. For a 2D robot with 10 obstacles, that's 2 variables and 10 constraints — trivially fast to solve.
-
----
-
-### Equation (15) — Gradient of the barrier function
-
-$$\nabla h(p) = 2(p - p_o)$$
-
-**Why it's here:** To implement the QP (Eq. 11), we need the gradient of $h$, which feeds into the Lie derivatives $L_f h$ and $L_g L_f h$. This equation computes it for the circular obstacle barrier.
-
-**What it is:** The gradient of $h(p) = \|p - p_o\|^2 - r_{\text{safe}}^2$.
-
-**Intuition:** The gradient points from the obstacle toward the robot — the direction of increasing safety. Its magnitude is $2\|p - p_o\|$ — larger when farther away.
-
-**Variable drill-down:**
-
-| Variable | What it is here |
-|----------|----------------|
-| $\nabla h(p)$ | $n_p \times 1$ vector: direction of steepest increase in $h$ |
-| $2(p - p_o)$ | Points from obstacle centre to robot, magnitude $2\|p - p_o\|$ |
-
-**Connection to DAF's $\eta$:** The unit normal $\eta(p) = (p - p_o)/\|p - p_o\|$ in DAF is the normalised version of $\nabla h / \|\nabla h\|$. Both point away from the obstacle.
-
----
-
-### Equation (16) — Lie derivatives for obstacle avoidance
-
-$$L_f h = 2(p - p_o)^\top v, \qquad L_g L_f h = 2(p - p_o)^\top$$
-
-and
-
-$$L_f^2 h = 2\|v\|^2$$
-
-**Why it's here:** These are the concrete Lie derivatives needed to build the QP constraint (Eq. 9). They are computed by differentiating $h$ along the system dynamics.
-
-**What they are:**
-- $L_f h = \dot{h}$: rate of change of the barrier function. Depends on velocity — negative means approaching.
-- $L_f^2 h$: the drift contribution to $\ddot{h}$. Equals $2\|v\|^2$ — always non-negative, meaning speed alone makes $h$ "want" to increase (centrifugal-like effect).
-- $L_g L_f h$: the control effectiveness. The row vector $2(p - p_o)^\top$ shows that control in the direction away from the obstacle increases $\ddot{h}$.
-
-**Variable drill-down:**
-
-| Variable | What it is here |
-|----------|----------------|
-| $L_f h = 2(p - p_o)^\top v$ | Dot product of separation direction and velocity. Negative = approaching obstacle. Equivalent to $2\|p - p_o\| \cdot \dot{d}$ where $\dot{d}$ is DAF's approach rate. |
-| $L_f^2 h = 2\|v\|^2$ | Always $\geq 0$. Faster robots naturally cause $\ddot{h}$ to be more positive. Think of it as the centrifugal effect — speed creates an "outward push" in barrier space. |
-| $L_g L_f h = 2(p - p_o)^\top$ | A $1 \times m$ row vector. When multiplied by $u$: $2(p - p_o)^\top u$ = the acceleration component away from the obstacle, scaled by distance. |
-
----
-
-### Equation (17) — Complete QP for a circular obstacle (implementable)
+The QP combines them:
 
 $$u^* = \underset{u}{\arg\min} \quad \|u - u_{\text{nom}}\|^2$$
-$$\text{s.t.} \quad 2(p - p_o)^\top u + 2\|v\|^2 + 2\alpha_1(p - p_o)^\top v + \alpha_2 h(p) \geq 0$$
+$$\text{subject to:} \quad 2(p-p_o)^\top u + 2\|v\|^2 + 2\alpha_1(p-p_o)^\top v + \alpha_2 h \geq 0$$
 
-**Why it's here:** This is the fully expanded, implementable QP for a single circular obstacle. This is what you code up. Compare with DAF's Eq. 13 — a closed-form formula vs. an optimisation problem.
+**In plain English:** "Find the acceleration $u^*$ that is as close as possible to what the nominal controller wants, but also satisfies the safety constraint."
 
-**What it is:** The final CBF-QP combining all the pieces.
+**What happens in practice:**
+- If $u_{\text{nom}}$ already satisfies the constraint: $u^* = u_{\text{nom}}$. No change. The co-pilot stays quiet.
+- If $u_{\text{nom}}$ violates the constraint: $u^*$ is the nearest safe point — a projection onto the constraint boundary.
 
-**Implementation mapping:**
+### Closed-form solution (single obstacle)
 
-| What to compute | Formula | Source |
-|-----------------|---------|--------|
-| $u_{\text{nom}}$ | $-k_1(p-p_d) - k_2 v$ | Eq. 10 (PD controller) |
-| $h(p)$ | $\|p-p_o\|^2 - r_{\text{safe}}^2$ | Eq. 3 |
-| $\dot{h}$ | $2(p-p_o)^\top v$ | Eq. 16 |
-| Constraint LHS | $2(p-p_o)^\top u + 2\|v\|^2 + 2\alpha_1(p-p_o)^\top v + \alpha_2 h$ | Eqs. 7-9 combined |
-| $u^*$ | Solve QP (or closed-form projection for single constraint) | Eq. 11 |
+For one obstacle, you don't even need a QP solver. Define:
+- $A = 2(p - p_o)^\top$ (a row vector)
+- $b = 2\|v\|^2 + 2\alpha_1(p-p_o)^\top v + \alpha_2 h$ (a scalar)
 
-**Closed-form solution** (single obstacle, derived by KKT conditions):
+Then:
 
-$$u^* = \begin{cases} u_{\text{nom}}, & \text{if } A u_{\text{nom}} + b \geq 0 \\ u_{\text{nom}} + \frac{-(A u_{\text{nom}} + b)}{A A^\top} A^\top, & \text{otherwise} \end{cases}$$
+$$u^* = \begin{cases} u_{\text{nom}}, & \text{if } A \cdot u_{\text{nom}} + b \geq 0 \\ u_{\text{nom}} + \dfrac{-(A \cdot u_{\text{nom}} + b)}{A \cdot A^\top} A^\top, & \text{otherwise} \end{cases}$$
 
-where $A = 2(p - p_o)^\top$ and $b = 2\|v\|^2 + 2\alpha_1(p-p_o)^\top v + \alpha_2 h$.
+The second case is just a projection — push $u_{\text{nom}}$ in the direction $A^\top$ (away from obstacle) by exactly enough to satisfy the constraint.
 
----
+### Multiple obstacles
 
-### Equation (18) — Structural comparison with DAF
+Just add one constraint per obstacle:
 
-**DAF (Eq. 13):**
-$$u_{\text{DAF}} = \underbrace{-k_1(p - p_d)}_{\text{goal}} - \underbrace{k_2 v}_{\text{damping}} - \underbrace{k_3 \gamma(d)\, \eta\, \eta^\top v}_{\text{obstacle braking}}$$
+$$\text{s.t.} \quad 2(p - p_{o,i})^\top u + 2\|v\|^2 + 2\alpha_1(p-p_{o,i})^\top v + \alpha_2 h_i \geq 0, \quad i = 1, \ldots, N_{obs}$$
 
-**CBF (Eq. 17):**
-$$u_{\text{CBF}} = \underbrace{u_{\text{nom}}}_{\text{goal + damping}} + \underbrace{\lambda \cdot (p - p_o)}_{\text{safety correction}}$$
-
-where $\lambda \geq 0$ is the Lagrange multiplier from the QP (zero when safe, positive when constraint is active).
-
-**Why it's here:** This side-by-side makes the philosophical difference precise.
-
-**Comparison table:**
-
-| Aspect | DAF | CBF |
-|--------|-----|-----|
-| **Obstacle term** | $-k_3\gamma\eta(\eta^\top v)$ — always computed, proportional to approach speed and proximity | $\lambda (p-p_o)$ — only nonzero when constraint is active |
-| **When does it activate?** | Whenever $d < \epsilon_2$ (enters braking zone) | Only when $u_{\text{nom}}$ would violate the safety constraint |
-| **Direction** | Along $\eta$ (obstacle normal) | Along $p - p_o$ (away from obstacle) |
-| **Depends on velocity?** | Yes — $\eta^\top v$ is the approach speed | Indirectly — through the constraint evaluation |
-| **Magnitude** | Continuous, scales with $\gamma(d) = 1/d$ near wall | Discontinuous in its activation (on/off), but smooth when active |
-| **Tuning knobs** | $k_3, \epsilon_1, \epsilon_2$ | $\alpha_1, \alpha_2$ |
-| **Can get stuck on flat walls?** | Yes (Eq. 14-15 in DAF paper) | Yes, but differently — the nominal controller determines stuck behavior |
+This is a big advantage over DAF and APF, which only track the nearest obstacle.
 
 ---
 
-### Equation (19) — Structural comparison with APF
+## Step 6 — Why It's Safe (The Proof Idea)
 
-**APF (DAF paper Eq. 18):**
-$$u_{\text{APF}} = -k_a(p - p_d) - k_v v + k_r F_r(p)$$
+**Claim:** If the robot starts safe ($h(x(0)) \geq 0$) and the control always satisfies the CBF condition, then the robot stays safe forever:
 
-**CBF (Eq. 17):**
-$$u_{\text{CBF}} = u_{\text{nom}} + \lambda \cdot (p - p_o)$$
+$$h(x(0)) \geq 0 \implies h(x(t)) \geq 0 \quad \text{for all } t \geq 0$$
 
-**Key difference:** APF's repulsive force $F_r(p)$ depends only on position — it pushes even when moving away. CBF's correction $\lambda (p-p_o)$ is zero when the constraint isn't active — if $u_{\text{nom}}$ is already safe, CBF doesn't intervene at all. This means CBF produces smoother motion when obstacles are nearby but not threatening.
+**Why:** The CBF condition says $\dot{h} \geq -\alpha(h)$. At the boundary ($h = 0$), this becomes $\dot{h} \geq -\alpha(0) = 0$. So $h$ can never decrease past zero — the robot can never cross the safety boundary. This is called **forward invariance** of the safe set.
 
-| Aspect | APF | CBF |
-|--------|-----|-----|
-| **Always pushes?** | Yes — $F_r \neq 0$ whenever $d < \epsilon_2$ | No — $\lambda = 0$ when $u_{\text{nom}}$ is safe |
-| **Local minima** | Common (repulsive + attractive forces cancel) | Possible but mitigated by QP feasibility |
-| **Jerkiness** | High (sudden force changes) | Low (minimal modification to nominal) |
-| **Formal safety proof** | No | Yes (forward invariance) |
+**One requirement:** The QP must always have a solution (be "feasible"). For circular obstacle avoidance, this holds as long as the robot starts outside the obstacle, because the control effectiveness $2(p - p_o)^\top$ is nonzero whenever $p \neq p_o$.
 
 ---
 
-## Complete Variable Reference Table
+## DAF vs CBF vs APF — Side by Side
 
-| Symbol | Type | Defined | Meaning |
-|--------|------|---------|---------|
-| $n$ | scalar | given | State space dimension |
-| $m$ | scalar | given | Control input dimension |
-| $n_p$ | scalar | given | Position space dimension (2 or 3) |
-| $x$ | $\mathbb{R}^n$ | state | Full state $[p^\top, v^\top]^\top$ |
-| $p$ | $\mathbb{R}^{n_p}$ | state | Robot centre position |
-| $v$ | $\mathbb{R}^{n_p}$ | state | Robot velocity |
-| $u$ | $\mathbb{R}^m$ | design | Control acceleration |
-| $u_{\text{nom}}$ | $\mathbb{R}^m$ | Eq. 10 | Nominal (goal-seeking) control |
-| $u^*$ | $\mathbb{R}^m$ | Eq. 11 | Optimal safe control (QP output) |
-| $p_d$ | $\mathbb{R}^{n_p}$ | given | Goal position |
-| $p_o$ | $\mathbb{R}^{n_p}$ | given | Obstacle centre position |
-| $R$ | $\mathbb{R}_{>0}$ | given | Robot radius |
-| $r_o$ | $\mathbb{R}_{>0}$ | given | Obstacle radius |
-| $\epsilon$ | $\mathbb{R}_{>0}$ | design | Safety margin |
-| $r_{\text{safe}}$ | $\mathbb{R}_{>0}$ | derived | $R + r_o + \epsilon$ — minimum centre-to-centre distance |
-| $f(x)$ | $\mathbb{R}^n$ | Eq. 1 | Drift dynamics |
-| $g(x)$ | $\mathbb{R}^{n \times m}$ | Eq. 1 | Control input matrix |
-| $h(x)$ | $\mathbb{R}$ | Eq. 3 | Barrier function |
-| $\dot{h}$ | $\mathbb{R}$ | Eq. 7 | Time derivative of barrier function |
-| $\ddot{h}$ | $\mathbb{R}$ | Eq. 7 | Second time derivative of barrier function |
-| $\nabla h$ | $\mathbb{R}^n$ | Eq. 15 | Gradient of $h$ |
-| $L_f h$ | $\mathbb{R}$ | Eq. 16 | Lie derivative of $h$ along $f$ |
-| $L_g h$ | $\mathbb{R}^{1 \times m}$ | Eq. 5 | Lie derivative of $h$ along $g$ |
-| $L_f^2 h$ | $\mathbb{R}$ | Eq. 16 | Second Lie derivative of $h$ along $f$ |
-| $L_g L_f h$ | $\mathbb{R}^{1 \times m}$ | Eq. 16 | Mixed Lie derivative |
-| $\alpha(\cdot)$ | function | Eq. 4 | Class $\mathcal{K}_\infty$ function |
-| $\alpha_0$ | $\mathbb{R}_{>0}$ | design | CBF enforcement gain (linear $\alpha$) |
-| $\alpha_1$ | $\mathbb{R}_{>0}$ | Eq. 8 | ECBF damping parameter |
-| $\alpha_2$ | $\mathbb{R}_{>0}$ | Eq. 8 | ECBF stiffness parameter |
-| $k_1$ | $\mathbb{R}_{>0}$ | Eq. 10 | Nominal controller position gain |
-| $k_2$ | $\mathbb{R}_{>0}$ | Eq. 10 | Nominal controller damping gain |
-| $\lambda$ | $\mathbb{R}_{\geq 0}$ | Eq. 18 | QP Lagrange multiplier |
-| $\mathcal{C}$ | set | Eq. 2 | Safe set $\{x : h(x) \geq 0\}$ |
-| $N_{obs}$ | $\mathbb{N}$ | Eq. 14 | Number of obstacles |
-| $d(p)$ | $\mathbb{R}$ | derived | $\|p - p_o\| - r_{\text{safe}}$ — surface-to-surface distance |
-| $\eta(p)$ | unit vector | derived | $(p - p_o)/\|p - p_o\|$ — direction from obstacle to robot |
+### How each handles obstacle avoidance:
+
+**DAF** bakes everything into one formula:
+$$u = \underbrace{-k_1(p - p_d)}_{\text{go to goal}} - \underbrace{k_2 v}_{\text{slow down}} - \underbrace{k_3 \gamma(d)\, \eta\, \eta^\top v}_{\text{brake near obstacles}}$$
+
+**CBF** keeps them separate:
+$$u^* = \underbrace{u_{\text{nom}}}_{\text{go to goal + slow down}} + \underbrace{\lambda \cdot (p - p_o)}_{\text{safety correction (only when needed)}}$$
+
+where $\lambda \geq 0$ is automatically computed by the QP (zero when safe, positive when intervening).
+
+**APF** adds a repulsive force:
+$$u = \underbrace{-k_a(p - p_d)}_{\text{go to goal}} - \underbrace{k_v v}_{\text{slow down}} + \underbrace{k_r F_r(p)}_{\text{push away from obstacles (always)}}$$
+
+### Key differences:
+
+| Question | APF | DAF | CBF |
+|----------|-----|-----|-----|
+| Does it push when moving away from obstacle? | Yes (wasteful) | No (only brakes when approaching) | No (only intervenes when needed) |
+| Can it handle multiple obstacles? | Nearest only | Nearest only | All at once (one constraint each) |
+| Is there a safety proof? | No | Yes | Yes |
+| What do you tune? | $k_a, k_v, k_r$ | $k_1, k_2, k_3, \epsilon_1, \epsilon_2$ | $k_1, k_2, \alpha_1, \alpha_2$ |
+| Can you swap the goal controller? | No (coupled) | No (coupled) | Yes (modular) |
+| Gets stuck on flat walls? | Yes | Yes | Yes (but for different reasons) |
 
 ---
 
-## Summary: Why CBF is Useful
+## Implementation Checklist
 
-1. **Modular** — Design your goal-seeking controller however you want, then add CBF as a safety layer. Swap controllers without changing the safety logic.
-2. **Minimal intervention** — The QP modifies the nominal control only when necessary, producing smoother paths than APF or DAF when obstacles aren't threatening.
-3. **Formally safe** — Forward invariance is proven mathematically. If the QP is feasible, safety is guaranteed.
-4. **Multi-constraint** — Multiple obstacles, velocity limits, actuator bounds — just add more constraints to the QP. No redesign needed.
-5. **Works in any dimension** — The theory is dimension-agnostic.
-6. **Transparent** — You can inspect $\lambda$ (the Lagrange multiplier) to see exactly when and how much the CBF intervenes.
+To code up CBF for a single circular obstacle in 2D:
 
-### Limitations
+**Inputs at each timestep:**
+- $p$ — robot position (from sensors)
+- $v$ — robot velocity (from sensors)
+- $p_d$ — goal position (given)
+- $p_o, r_o$ — obstacle centre and radius (from sensors)
 
-1. **QP solve per timestep** — More expensive than DAF/APF's closed-form controllers (though typically negligible for small obstacle counts).
-2. **Feasibility not guaranteed** — If obstacles completely surround the robot, no safe $u$ exists. DAF's $1/d$ barrier handles this more gracefully (it just brakes harder).
-3. **Conservative with high $\alpha$** — Aggressive enforcement can make the robot avoid obstacles too early. Tuning $\alpha_1, \alpha_2$ requires care.
-4. **Nominal controller still matters** — CBF filters for safety but inherits the nominal controller's stuck points and local minima. If the PD controller drives into a corner, CBF prevents collision but doesn't help escape.
+**Compute:**
+1. Nominal control: $u_{\text{nom}} = -k_1(p - p_d) - k_2 v$
+2. Barrier value: $h = \|p - p_o\|^2 - (R + r_o + \epsilon)^2$
+3. Barrier derivative: $\dot{h} = 2(p - p_o)^\top v$
+4. Constraint check: $A = 2(p - p_o)^\top$, $b = 2\|v\|^2 + 2\alpha_1 \dot{h}/2 + \alpha_2 h$
+   - Wait, more carefully: $b = 2\|v\|^2 + 2\alpha_1(p - p_o)^\top v + \alpha_2 h$
+5. If $A \cdot u_{\text{nom}} + b \geq 0$: use $u^* = u_{\text{nom}}$
+6. Else: $u^* = u_{\text{nom}} + \frac{-(A \cdot u_{\text{nom}} + b)}{A \cdot A^\top} A^\top$
 
----
+**Output:** Apply $u^*$ to the robot.
 
-## Summary: The Logical Chain
-
-$$\underbrace{\text{Model system}}_{\text{Eq. 1}} \;\longrightarrow\; \underbrace{\text{Define safety}}_{\text{Eqs. 2-3}} \;\longrightarrow\; \underbrace{\text{CBF condition}}_{\text{Eqs. 4-5}} \;\longrightarrow\; \underbrace{\text{Handle rel. degree 2}}_{\text{Eqs. 6-9}} \;\longrightarrow\; \underbrace{\text{Nominal ctrl + QP}}_{\text{Eqs. 10-11}} \;\longrightarrow\; \underbrace{\text{Prove safety}}_{\text{Eqs. 12-13}} \;\longrightarrow\; \underbrace{\text{Multi-obstacle}}_{\text{Eq. 14}} \;\longrightarrow\; \underbrace{\text{Implement}}_{\text{Eqs. 15-17}} \;\longrightarrow\; \underbrace{\text{Compare}}_{\text{Eqs. 18-19}}$$
-
----
----
-
-# CBF — Simulation Ideas for Understanding
-
-Ordered from simple to advanced.
+For multiple obstacles, use a QP solver (e.g., `scipy.optimize.minimize` or OSQP) with one constraint per obstacle.
 
 ---
 
-## 1. Nominal PD Controller (No Safety)
-- Use only: $u = -k_1(p - p_d) - k_2 v$
-- Show the robot driving straight through obstacles
-- Demonstrates why a safety filter is needed
+## Symbol Reference
 
-## 2. Single Circular Obstacle with CBF-QP
-- Implement the full QP (Eq. 17)
-- Place goal on opposite side of obstacle
-- Observe: robot curves around obstacle with minimal deviation from straight-line path
-- Compare with DAF and APF trajectories
-
-## 3. Visualise the Barrier Function $h(p)$
-- Plot $h(p)$ as a 2D heatmap or contour plot
-- Show the zero-level set ($h = 0$) as the safety boundary
-- Overlay the robot trajectory on the contour plot
-
-## 4. CBF vs DAF vs APF Side-by-Side (Single Obstacle)
-- Identical initial conditions and goal
-- Overlay all three trajectories
-- Plot $\|u\|$, $\|v\|$, $d(t)$ over time
-- Key observations: CBF intervenes later but more precisely; DAF brakes smoothly; APF jerks
-
-## 5. QP Activation Visualization
-- Plot the Lagrange multiplier $\lambda(t)$ over time
-- $\lambda = 0$: CBF not intervening (nominal control is safe)
-- $\lambda > 0$: CBF is actively modifying the control
-- Shows the "minimal intervention" principle in action
-
-## 6. Effect of $\alpha_1, \alpha_2$ on Conservatism
-- Sweep $\alpha_1$ and $\alpha_2$
-- Small values: robot gets very close to obstacles before CBF activates
-- Large values: robot keeps a wide berth (conservative)
-- Plot minimum distance vs. $\alpha$ parameters
-
-## 7. Multiple Obstacles
-- 3-5 obstacles between start and goal
-- Show how the QP handles multiple constraints simultaneously
-- Compare with DAF's nearest-obstacle-only approach
-
-## 8. Flat Wall (CBF vs DAF Stuck Behavior)
-- Same scenario as the DAF wall simulation
-- Robot heading straight at a flat wall with goal behind it
-- Both methods get stuck — but for different reasons
-- DAF: equilibrium from force cancellation; CBF: nominal controller has no escape plan
-
-## 9. Narrow Corridor
-- Two parallel walls with a gap
-- Tests feasibility of the QP with opposing constraints
-- DAF may oscillate; CBF should find the gap if feasible
-
-## 10. Moving Obstacles
-- Add time-varying $p_o(t)$
-- Requires recomputing $h, \dot{h}$ accounting for obstacle motion
-- CBF handles this naturally by updating constraints each timestep
+| Symbol | What it means |
+|--------|---------------|
+| $x = [p, v]$ | Full state (position + velocity) |
+| $p$ | Robot position |
+| $v$ | Robot velocity |
+| $u$ | Control input (acceleration) |
+| $p_d$ | Goal position |
+| $p_o$ | Obstacle centre |
+| $R$ | Robot radius |
+| $r_o$ | Obstacle radius |
+| $\epsilon$ | Extra safety margin |
+| $h(x)$ | Barrier function (positive = safe) |
+| $\dot{h}$ | How fast safety is changing |
+| $\ddot{h}$ | How fast $\dot{h}$ is changing |
+| $L_f h$ | How $h$ changes due to drift (no control) |
+| $L_g h$ | How control affects $h$ |
+| $\alpha(\cdot)$ | Function controlling enforcement aggressiveness |
+| $\alpha_1, \alpha_2$ | ECBF tuning parameters (damping, stiffness) |
+| $k_1, k_2$ | Nominal controller gains (goal spring, friction) |
+| $u_{\text{nom}}$ | What the nominal controller wants |
+| $u^*$ | What the robot actually does (safe version) |
+| $\lambda$ | QP multiplier (0 = CBF inactive, >0 = CBF intervening) |
+| $\mathcal{C}$ | Safe set — all states where $h \geq 0$ |
+| $\nabla h$ | Gradient of $h$ — direction of increasing safety |
 
 ---
 
-## Minimum Priority Set
+## Summary
 
-| Priority | Simulation | What it proves |
-|----------|-----------|----------------|
-| 1 | Single circle, CBF-QP (#2) | Core QP implementation works |
-| 2 | CBF vs DAF vs APF comparison (#4) | Why CBF is different |
-| 3 | $\lambda(t)$ visualization (#5) | Minimal intervention principle |
-| 4 | Effect of $\alpha$ parameters (#6) | How to tune CBF |
-| 5 | Flat wall comparison (#8) | Both methods' stuck behavior |
+1. **Pick a barrier function $h$** that is positive when safe, zero at the boundary
+2. **Write the safety rule**: $\ddot{h} + \alpha_1 \dot{h} + \alpha_2 h \geq 0$
+3. **Solve a QP** at each timestep: closest safe control to what you want
+4. **Result**: the robot follows your controller when safe, and deviates minimally when needed
+
+$$\text{Model} \;\to\; \text{Define safety} \;\to\; \text{Safety rule} \;\to\; \text{Handle acceleration} \;\to\; \text{QP} \;\to\; \text{Proof}$$
+
+---
+---
+
+# CBF — Simulation Ideas
+
+| Priority | Simulation | What it shows |
+|----------|-----------|---------------|
+| 1 | Single circle, CBF-QP | Core implementation works |
+| 2 | CBF vs DAF vs APF comparison | Why CBF is different |
+| 3 | Plot $\lambda(t)$ over time | When/how much CBF intervenes |
+| 4 | Sweep $\alpha_1, \alpha_2$ | How tuning affects conservatism |
+| 5 | Flat wall (same as DAF sim) | Both methods' stuck behavior |
+| 6 | Multiple obstacles | QP handles multiple constraints |
